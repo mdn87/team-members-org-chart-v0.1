@@ -149,6 +149,53 @@ function tmoc_manage_members_page() {
     ?>
     <div class="wrap">
         <h1>Manage Team Members</h1>
+
+        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
+            <?php wp_nonce_field('tmoc_save_settings', 'tmoc_settings_nonce'); ?>
+            <input type="hidden" name="action" value="tmoc_save_settings">
+
+            <h2>Global Display Settings</h2>
+
+            <label for="tmoc_sort_order">Sort Order:</label>
+            <select name="tmoc_sort_order">
+                <option value="manual" <?php selected(get_option('tmoc_sort_order'), 'manual'); ?>>Manual</option>
+                <option value="date_desc" <?php selected(get_option('tmoc_sort_order'), 'date_desc'); ?>>Date Descending</option>
+                <option value="date_asc" <?php selected(get_option('tmoc_sort_order'), 'date_asc'); ?>>Date Ascending</option>
+                <option value="name" <?php selected(get_option('tmoc_sort_order'), 'name'); ?>>Name</option>
+                <option value="title" <?php selected(get_option('tmoc_sort_order'), 'title'); ?>>Title</option>
+                <option value="rank" <?php selected(get_option('tmoc_sort_order'), 'rank'); ?>>Rank</option>
+            </select>
+
+            <label for="tmoc_columns">Members Per Row:</label>
+            <input type="number" name="tmoc_columns" value="<?php echo esc_attr(get_option('tmoc_columns', 3)); ?>" min="1" max="6" />
+
+            <label for="tmoc_card_style">Card Style:</label>
+            <select name="tmoc_card_style">
+                <option value="style1" <?php selected(get_option('tmoc_card_style'), 'style1'); ?>>Style 1</option>
+                <option value="style2" <?php selected(get_option('tmoc_card_style'), 'style2'); ?>>Style 2</option>
+            </select>
+
+            <label for="tmoc_hover_style">Hover Style:</label>
+            <select name="tmoc_hover_style">
+                <option value="shadow" <?php selected(get_option('tmoc_hover_style'), 'shadow'); ?>>Shadow</option>
+                <option value="grow" <?php selected(get_option('tmoc_hover_style'), 'grow'); ?>>Grow</option>
+            </select>
+
+            <label for="tmoc_focus_style">Focus Style:</label>
+            <select name="tmoc_focus_style">
+                <option value="modal" <?php selected(get_option('tmoc_focus_style'), 'modal'); ?>>Modal</option>
+                <option value="anchor" <?php selected(get_option('tmoc_focus_style'), 'anchor'); ?>>Anchor Top and Grow</option>
+            </select>
+
+            <label for="tmoc_show_focus_on_load">
+                <input type="checkbox" name="tmoc_show_focus_on_load" value="yes" <?php checked(get_option('tmoc_show_focus_on_load'), 'yes'); ?> />
+                Show Focus on Load
+            </label>
+
+            <p><input type="submit" class="button button-primary" value="Save Settings (Override All Widgets)"></p>
+        </form>
+
+        <h2>Team Members</h2>
         <table class="wp-list-table widefat fixed striped">
             <thead>
                 <tr>
@@ -188,6 +235,9 @@ function tmoc_manage_members_page() {
                         echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="up">⬆</button>';
                         echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="down">⬇</button>';
                         echo '</td>';
+                        echo '<td>';
+                        echo '<a href="' . esc_url(get_edit_post_link($id)) . '" class="button button-primary">Edit</a>';
+                        echo '</td>';
                         echo '</tr>';
                     }
                     wp_reset_postdata();
@@ -201,6 +251,44 @@ function tmoc_manage_members_page() {
     <?php
 }
 
+// Global settings shared between the Manage Members page and the Team Members widget
+function tmoc_save_global_settings() {
+    // Ensure user has proper permissions
+    if (!current_user_can('manage_options')) {
+        wp_die(__('Unauthorized access.', 'plugin-name'));
+    }
+
+    // Validate Nonce
+    if (!isset($_POST['tmoc_settings_nonce']) || !wp_verify_nonce($_POST['tmoc_settings_nonce'], 'tmoc_save_settings')) {
+        wp_die(__('Security check failed.', 'plugin-name'));
+    }
+
+    // Save Options
+    update_option('tmoc_sort_order', sanitize_text_field($_POST['tmoc_sort_order']));
+    update_option('tmoc_columns', intval($_POST['tmoc_columns']));
+    update_option('tmoc_card_style', sanitize_text_field($_POST['tmoc_card_style']));
+    update_option('tmoc_hover_style', sanitize_text_field($_POST['tmoc_hover_style']));
+    update_option('tmoc_focus_style', sanitize_text_field($_POST['tmoc_focus_style']));
+    update_option('tmoc_show_focus_on_load', isset($_POST['tmoc_show_focus_on_load']) ? 'yes' : 'no');
+
+    // Force Elementor to clear cache and refresh
+    delete_transient('elementor_pro_license_data');
+    do_action('elementor/editor/after_save');
+
+    // Redirect back with a success message
+    wp_redirect(admin_url('admin.php?page=tmoc-manage-members&updated=true'));
+    exit;
+}
+add_action('admin_post_tmoc_save_settings', 'tmoc_save_global_settings');
+
+
+// CSS Styles for the admin page
+function tmoc_enqueue_admin_styles($hook) {
+    if ($hook === 'post.php' || $hook === 'post-new.php' || $hook === 'toplevel_page_tmoc-settings') {
+        wp_enqueue_style('tmoc-admin-css', plugin_dir_url(__FILE__) . 'admin-style.css');
+    }
+}
+add_action('admin_enqueue_scripts', 'tmoc_enqueue_admin_styles');
 
 // Callbacks for settings fields
 function tmoc_sort_order_callback() {
@@ -221,7 +309,7 @@ function tmoc_members_per_row_callback() {
     <?php
 }
 
-// Add meta box for additional fields
+// Add Meta Box for additional fields
 function tmoc_add_team_member_meta_box() {
     add_meta_box(
         'tmoc_team_member_details',
@@ -234,26 +322,69 @@ function tmoc_add_team_member_meta_box() {
 }
 add_action('add_meta_boxes', 'tmoc_add_team_member_meta_box');
 
-// Meta box callback function
+// Meta Box Callback - on display show the form fields
 function tmoc_team_member_meta_box_callback($post) {
     $job_title = get_post_meta($post->ID, '_tmoc_job_title', true);
     $bio = get_post_meta($post->ID, '_tmoc_bio', true);
     $image = get_post_meta($post->ID, '_tmoc_image', true);
-    $order = get_post_meta($post->ID, '_tmoc_order', true); // Fix this line
+    $image_fit = get_post_meta($post->ID, '_tmoc_image_fit', true) ?: 'cover';
+    $image_x = get_post_meta($post->ID, '_tmoc_image_x', true) ?: '0';
+    $image_y = get_post_meta($post->ID, '_tmoc_image_y', true) ?: '0';
+    $image_scale = get_post_meta($post->ID, '_tmoc_image_scale', true) ?: '1';
 
     echo '<label for="tmoc_job_title">Job Title:</label>';
     echo '<input type="text" id="tmoc_job_title" name="tmoc_job_title" value="' . esc_attr($job_title) . '" style="width:100%;" />';
-    
+
     echo '<label for="tmoc_bio">Bio:</label>';
     echo '<textarea id="tmoc_bio" name="tmoc_bio" rows="4" style="width:100%;">' . esc_textarea($bio) . '</textarea>';
-    
+
     echo '<label for="tmoc_image">Profile Image:</label>';
     echo '<input type="text" id="tmoc_image" name="tmoc_image" value="' . esc_attr($image) . '" style="width:80%;" />';
     echo '<button type="button" class="button tmoc_upload_image_button">Select from Media Library</button>';
-    
-    echo '<label for="tmoc_order">Display Order:</label>';
-    echo '<input type="number" id="tmoc_order" name="tmoc_order" value="' . esc_attr($order) . '" style="width:100%;" />';
+
+    echo '<label for="tmoc_image_fit">Image Fit:</label>';
+    echo '<select id="tmoc_image_fit" name="tmoc_image_fit">
+            <option value="cover" ' . selected($image_fit, 'cover', false) . '>Cover</option>
+            <option value="contain" ' . selected($image_fit, 'contain', false) . '>Contain</option>
+            <option value="fill" ' . selected($image_fit, 'fill', false) . '>Fill</option>
+            <option value="none" ' . selected($image_fit, 'none', false) . '>None</option>
+          </select>';
+
+    // Image Position X (with step buttons)
+    echo '<br />';
+    echo '<label for="tmoc_image_x">Image Position X (px):</label>';
+    echo '<div class="tmoc-flex-input">';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_x" data-step="-1">-</button>';
+    echo '<input type="number" id="tmoc_image_x" name="tmoc_image_x" value="' . esc_attr($image_x) . '" step="1" />';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_x" data-step="1">+</button>';
+    echo '</div>';
+
+    // Image Position Y (with step buttons)
+    echo '<label for="tmoc_image_y">Image Position Y (px):</label>';
+    echo '<div class="tmoc-flex-input">';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_y" data-step="-1">-</button>';
+    echo '<input type="number" id="tmoc_image_y" name="tmoc_image_y" value="' . esc_attr($image_y) . '" step="1" />';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_y" data-step="1">+</button>';
+    echo '</div>';
+
+    // Image Scale (with step buttons)
+    echo '<label for="tmoc_image_scale">Image Scale:</label>';
+    echo '<div class="tmoc-flex-input">';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_scale" data-step="-0.1">-</button>';
+    echo '<input type="number" id="tmoc_image_scale" name="tmoc_image_scale" value="' . esc_attr($image_scale) . '" step="0.1" min="0.5" max="2" />';
+    echo '<button type="button" class="tmoc-step-btn" data-target="tmoc_image_scale" data-step="0.1">+</button>';
+    echo '</div>';
+
+    // **Live Image Preview**
+    echo '<div id="tmoc_image_preview" style="margin-top: 15px; width: 120px; height: 120px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 2px solid #ddd; background-size: ' . esc_attr($image_fit) . '; background-position: ' . esc_attr($image_x) . 'px ' . esc_attr($image_y) . 'px; background-image: url(' . esc_url($image) . ');">';
+    if (!empty($image)) {
+        echo '<img id="tmoc_preview_img" src="' . esc_url($image) . '" style="width:100%; height:100%; object-fit: ' . esc_attr($image_fit) . '; transform: scale(' . esc_attr($image_scale) . '); object-position: ' . esc_attr($image_x) . 'px ' . esc_attr($image_y) . 'px;" />';
+    }
+    echo '</div>';
 }
+
+
+
 
 
 // Save the custom fields
@@ -266,6 +397,18 @@ function tmoc_save_team_member_meta($post_id) {
     }
     if (array_key_exists('tmoc_image', $_POST)) {
         update_post_meta($post_id, '_tmoc_image', sanitize_text_field($_POST['tmoc_image']));
+    }
+    if (array_key_exists('tmoc_image_fit', $_POST)) {
+        update_post_meta($post_id, '_tmoc_image_fit', sanitize_text_field($_POST['tmoc_image_fit']));
+    }
+    if (array_key_exists('tmoc_image_x', $_POST)) {
+        update_post_meta($post_id, '_tmoc_image_x', sanitize_text_field($_POST['tmoc_image_x']));
+    }
+    if (array_key_exists('tmoc_image_y', $_POST)) {
+        update_post_meta($post_id, '_tmoc_image_y', sanitize_text_field($_POST['tmoc_image_y']));
+    }
+    if (array_key_exists('tmoc_image_scale', $_POST)) {
+        update_post_meta($post_id, '_tmoc_image_scale', floatval($_POST['tmoc_image_scale']));
     }
 
     // Assign default order if not set
@@ -317,10 +460,24 @@ function tmoc_set_default_order() {
 // Run this function when the plugin initializes
 add_action('init', 'tmoc_set_default_order');
 
+// Remove the editor for the "team_member" post type
+function tmoc_hide_editor() {
+    global $pagenow;
+    
+    // Only remove the editor for the "team_member" post type
+    if (get_post_type() === 'team_member' && in_array($pagenow, ['post.php', 'post-new.php'])) {
+        remove_post_type_support('team_member', 'editor');
+        add_post_type_support('bio', 'editor');
+        add_post_type_support('team_image', 'thumbnail');
+        error_log('🌻 Customized team_member post type options');
+    }
+}
+add_action('admin_head', 'tmoc_hide_editor');
+
 // Script for admin page live updates
 // Load JS and localize AJAX URL
 function tmoc_enqueue_admin_scripts($hook) {
-    error_log("🟢 Admin scripts hook triggered on: " . $hook);
+    // error_log("🟢 Admin scripts hook triggered on: " . $hook);
 
     // Load admin.js if we're on any Team Members-related page
     if (strpos($hook, 'tmoc') !== false) {
@@ -330,6 +487,10 @@ function tmoc_enqueue_admin_scripts($hook) {
         error_log("🚀 Enqueued admin.js successfully!");
     } else {
         error_log("❌ Skipping script enqueue, not on plugin page.");
+    }
+    if ('post.php' === $hook || 'post-new.php' === $hook) {
+        wp_enqueue_media(); // Enables WordPress media uploader
+        wp_enqueue_script('tmoc-admin-js', plugin_dir_url(__FILE__) . 'admin.js', array('jquery'), null, true);
     }
 }
 add_action('admin_enqueue_scripts', 'tmoc_enqueue_admin_scripts');
