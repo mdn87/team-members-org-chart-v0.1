@@ -27,50 +27,31 @@ use Elementor\Controls_Manager;
 
 // main widget class
 class Team_Members_Org_Chart_Widget extends Widget_Base {
+    public function get_style_depends() {
+        return ['tmoc-widget-css']; // This tells Elementor to enqueue 'widget.css'
+    }   
+    
     public function get_name() {
         return 'team_members_org_chart';
     }
-
     public function get_title() {
         return __('Team Members Org Chart', 'plugin-name');
     }
-
     public function get_icon() {
         return 'eicon-person';
     }
-
     public function get_categories() {
         return ['general'];
     }
-
     protected function _register_controls() {
         $this->start_controls_section(
             'content_section',
             [
-                'label' => __('Content', 'plugin-name'),
+                'label' => __('Instance specific settings', 'plugin-name'),
                 'tab' => Controls_Manager::TAB_CONTENT,
             ]
         );
-
-        $this->add_control(
-            'sort_order',
-            [
-                'label' => __('Sort Order', 'plugin-name'),
-                'type' => Controls_Manager::SELECT,
-                'options' => [
-                    'manual' => __('Manual', 'plugin-name'),
-                    'date_desc' => __('Date Descending', 'plugin-name'),
-                    'date_asc' => __('Date Ascending', 'plugin-name'),
-                    'name' => __('Name', 'plugin-name'),
-                    'title' => __('Title', 'plugin-name'),
-                    'rank' => __('Rank', 'plugin-name'),
-                ],
-                'default' => isset($this->get_settings_for_display()['sort_order']) 
-                    ? $this->get_settings_for_display()['sort_order'] 
-                    : get_option('tmoc_sort_order', 'manual'),
-            ]
-        );
-
+        
         $this->add_control(
             'columns',
             [
@@ -79,60 +60,29 @@ class Team_Members_Org_Chart_Widget extends Widget_Base {
                 'min' => 1,
                 'max' => 6,
                 'step' => 1,
-                'default' => isset($this->get_settings_for_display()['columns']) 
-                    ? $this->get_settings_for_display()['columns'] 
-                    : get_option('tmoc_columns', 3),
-            ]
-        );
-
-        $this->add_control(
-            'card_style',
-            [
-                'label' => __('Card Style', 'plugin-name'),
-                'type' => Controls_Manager::SELECT,
-                'options' => [
-                    'style1' => __('Style 1', 'plugin-name'),
-                    'style2' => __('Style 2', 'plugin-name'),
+                'default' => get_option('tmoc_columns', 4),
+                'selectors' => [
+                    '{{WRAPPER}} .team-members-container' => ' --columns: {{VALUE}};',
                 ],
-                'default' => isset($this->get_settings_for_display()['card_style']) 
-                    ? $this->get_settings_for_display()['card_style'] 
-                    : get_option('tmoc_card_style', 'style1'),
-
+                'render_type' => 'template', // Forces Elementor to re-render the widget
             ]
         );
-
+        
         $this->add_control(
-            'hover_style',
+            'gap',
             [
-                'label' => __('Hover Style', 'plugin-name'),
-                'type' => Controls_Manager::SELECT,
-                'options' => [
-                    'shadow' => __('Shadow', 'plugin-name'),
-                    'grow' => __('Grow', 'plugin-name'),
+                'label' => __('Gap Between Members', 'plugin-name'),
+                'type' => Controls_Manager::SLIDER,
+                'size_units' => ['px', '%'],
+                'range' => [
+                    'px' => ['min' => 0, 'max' => 50],
                 ],
-                'default' => isset($this->get_settings_for_display()['hover_style']) 
-                    ? $this->get_settings_for_display()['hover_style'] 
-                    : get_option('tmoc_hover_style', 'shadow'),
-
-            ]
-        );
-
-        $this->add_control(
-            'focus_style',
-            [
-                'label' => __('Focus Style', 'plugin-name'),
-                'type' => Controls_Manager::SELECT,
-                'options' => [
-                    'modal' => __('Modal', 'plugin-name'),
-                    'anchor' => __('Anchor Top and Grow', 'plugin-name'),
+                'default' => [
+                    'size' => get_option('tmoc_gap', 20), // Ensure a global default
+                    'unit' => 'px',
                 ],
-                'default' => isset($this->get_settings_for_display()['focus_style']) 
-                    ? $this->get_settings_for_display()['focus_style'] 
-                    : get_option('tmoc_focus_style', 'modal'),
-
             ]
-        );
-
+        );        
         $this->add_control(
             'show_focus_on_load',
             [
@@ -141,12 +91,9 @@ class Team_Members_Org_Chart_Widget extends Widget_Base {
                 'label_on' => __('Yes', 'plugin-name'),
                 'label_off' => __('No', 'plugin-name'),
                 'return_value' => 'yes',
-                'default' => isset($this->get_settings_for_display()['show_focus_on_load']) 
-                    ? $this->get_settings_for_display()['show_focus_on_load'] 
-                    : get_option('tmoc_show_focus_on_load', 'no'),
+                'default' => get_option('tmoc_show_focus_on_load', 'no'),
             ]
         );
-
         $this->add_control(
             'reset_to_global',
             [
@@ -155,46 +102,19 @@ class Team_Members_Org_Chart_Widget extends Widget_Base {
                 'button_type' => 'default',
                 'event' => 'reset_to_global_defaults',
             ]
-        );        
-
+        );
         $this->end_controls_section();
     }
 
+    // --------------- Render Widget for Display ----------------- //
     protected function render() {
         $settings = $this->get_settings_for_display();
-        $columns = $settings['columns'];
-        $gap = $settings['gap']['size'] . $settings['gap']['unit'];
-        echo '<div class="team-members-container" style="display: flex; flex-wrap: wrap; gap: ' . esc_attr($gap) . '; justify-content: center;">';
+        $columns = isset($settings['columns']) ? $settings['columns'] : 3;
+        $gap = isset($settings['gap']['size']) ? $settings['gap']['size'] . $settings['gap']['unit'] : '20px';
+        error_log("🔄 Rendering Widget: Columns = $columns | Gap = $gap");
 
-        // Ensure order is valid; if first post has order 0, reset all orders
-        $first_post = get_posts([
-            'post_type'      => 'team_member',
-            'posts_per_page' => 1,
-            'orderby'        => 'meta_value_num',
-            'meta_key'       => '_tmoc_order',
-            'order'          => 'ASC',
-            'fields'         => 'ids',
-        ]);
+        echo '<div class="team-members-container" data-columns="' . esc_attr($columns) . '" data-gap="' . esc_attr($gap) . '">';
         
-        if (!empty($first_post)) {
-            $first_order = get_post_meta($first_post[0], '_tmoc_order', true);
-            if ($first_order == 0 || empty($first_order)) {
-                $all_posts = get_posts([
-                    'post_type'      => 'team_member',
-                    'posts_per_page' => -1,
-                    'orderby'        => 'date',
-                    'order'          => 'ASC',
-                ]);
-                $order = 1;
-                foreach ($all_posts as $post) {
-                    update_post_meta($post->ID, '_tmoc_order', $order);
-                    $order++;
-                }
-            }
-        }
-
-        echo '<div class="team-members-container" style="display: flex; flex-wrap: wrap; gap: ' . esc_attr($gap) . '; justify-content: center;">';
-
         $args = array(
             'post_type'      => 'team_member',
             'posts_per_page' => -1,
@@ -203,14 +123,13 @@ class Team_Members_Org_Chart_Widget extends Widget_Base {
             'order'          => 'ASC',
         );
         $query = new \WP_Query($args);
-
-        error_log("🔍 Querying team members: Found " . $query->found_posts . " members.");
-
+    
         if ($query->have_posts()) {
             while ($query->have_posts()) {
                 $query->the_post();
                 $id = get_the_ID();
                 $title = get_the_title();
+                $order = get_post_meta($id, '_tmoc_order', true) ?: 9999;
                 $job_title = get_post_meta($id, '_tmoc_job_title', true);
                 $bio = get_post_meta($id, '_tmoc_bio', true);
                 $image = get_post_meta($id, '_tmoc_image', true);
@@ -218,19 +137,28 @@ class Team_Members_Org_Chart_Widget extends Widget_Base {
                 $position_x = get_post_meta($id, '_tmoc_image_x', true) ?: '50%';
                 $position_y = get_post_meta($id, '_tmoc_image_y', true) ?: '50%';
 
-                echo '<div class="team-member" style="width: calc(100% / ' . esc_attr($columns) . ' - ' . esc_attr($gap) . '); text-align: center; border: 2px solid #ddd; padding: 10px;">';
-                echo '<div style="width: 100px; height: 100px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background-size: ' . esc_attr($object_fit) . '; background-position: ' . esc_attr($position_x) . ' ' . esc_attr($position_y) . '; background-image: url(' . esc_url($image) . ');"></div>';
+                error_log("✅ Post ID: $id | Order: " . get_post_meta($id, '_tmoc_order', true));
+    
+                /* --- hard coded css to override styles --- //
+                echo '<div class="team-member" 
+                    data-id="' . esc_attr($id) . '" 
+                    style="flex: 0 1 calc(100% / ' . esc_attr($columns) . ' - ' . esc_attr($gap) . '); max-width: calc(100% / ' . esc_attr($columns) . ' - ' . esc_attr($gap) . ');">';
+                    error_log("🛠 Rendering Member ID: " . $id);
+                */
+                echo '<div class="team-member" data-id="' . esc_attr($id) . '">';
+                echo '<div class="team-member-image" style="width: 100px; height: 100px; border-radius: 50%; overflow: hidden; background-size: ' . esc_attr($object_fit) . '; background-position: ' . esc_attr($position_x) . ' ' . esc_attr($position_y) . '; background-image: url(' . esc_url($image) . ');"></div>';
                 echo '<h3>' . esc_html($title) . '</h3>';
                 echo '<p>' . esc_html($job_title) . '</p>';
+                echo '<div class="team-member-bio" style="display: none; margin-top: 10px; font-size: 14px;">' . esc_html($bio) . '</div>';
                 echo '</div>';
             }
             wp_reset_postdata();
         } else {
             echo '<p>No team members found.</p>';
         }
-
+    
         echo '</div>';
-    }
+    }    
 }
 
 // Register Widget
@@ -240,10 +168,14 @@ function register_team_members_org_chart_widget($widgets_manager) {
         error_log('Elementor not loaded or class Widget_Base not found');
         return;
     }
+    $widget = new Team_Members_Org_Chart_Widget();
+    $widgets_manager->register($widget);
+    
+    // Ensure styles load
+    $widget->enqueue_styles();
     error_log('Registering team members widget successfully');
-    $widgets_manager->register(new Team_Members_Org_Chart_Widget());
 }
-add_action('elementor/widgets/register', 'register_team_members_org_chart_widget');
+add_action('elementor/widgets/widgets_registered', 'TMOC\register_team_members_org_chart_widget');
 
 // Save default settings on plugin activation
 function tmoc_set_default_options() {
@@ -279,6 +211,21 @@ function tmoc_set_default_options() {
     }
 }
 register_activation_hook(__FILE__, 'tmoc_set_default_options');
+
+function tmoc_enqueue_widget_styles() {
+    // Always enqueue styles
+    wp_enqueue_style('tmoc-widget-css', plugin_dir_url(__FILE__) . 'widget.css', array(), null);
+    error_log("✅ Enqueued widget.css for Elementor editing and frontend (team-members-widget.php)");
+}
+add_action('elementor/frontend/after_enqueue_styles', 'tmoc_enqueue_widget_styles'); // For Elementor
+add_action('wp_enqueue_scripts', 'tmoc_enqueue_widget_styles'); // For frontend
+
+function tmoc_enqueue_gsap() {
+    wp_enqueue_script('gsap', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js', array(), null, true);
+    wp_enqueue_script('cssruleplugin', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/CSSRulePlugin.min.js', array(), null, true);
+    error_log("✅ Enqueued GSAP for animation (team-members-widget.php)");
+}
+add_action('wp_enqueue_scripts', 'tmoc_enqueue_gsap');
 
 
 

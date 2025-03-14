@@ -9,5 +9,8 @@
         {
             "path": "../../../../../../../Documents/Web/team-members-org-chart-v0.1"
         }
-    ]
+    ],
+    "settings": {
+        "liveServer.settings.multiRootWorkspaceName": "Local Sites"
+    }
 }

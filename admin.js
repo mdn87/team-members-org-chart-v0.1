@@ -1,4 +1,12 @@
+/* stylelint-disable */
 jQuery(document).ready(function ($) {
+
+
+    // ----------- All Pages ----------- //
+
+    
+
+    // ----------- Manage Team Members Page ----------- //
     $(".tmoc-move-member").click(function () {
         let postId = $(this).data("id");
         let direction = $(this).data("direction");
@@ -24,6 +32,32 @@ jQuery(document).ready(function ($) {
             },
         });
     });
+
+    $(".tmoc-sort").click(function () {
+        let sortOrder = $(this).data("sort");
+
+        $.ajax({
+            type: "POST",
+            url: tmoc_ajax.ajax_url,
+            data: {
+                action: "tmoc_sort_members",
+                sort: sortOrder
+            },
+            success: function (response) {
+                if (response.success) {
+                    $("#tmoc-team-members-list").html(response.data.html);
+                    console.log("✅ Sorted order:", sortOrder);
+                } else {
+                    console.error("❌ Error sorting members:", response);
+                }
+            },
+            error: function () {
+                console.error("❌ AJAX request failed.");
+            },
+        });
+    });
+
+    // ------------------------------------------------- //
 
     // Update image preview on upload
     function updatePreview() {
@@ -81,3 +115,4 @@ jQuery(document).ready(function ($) {
     // Initialize preview on page load
     updatePreview();
 });
+/* stylelint-enable */

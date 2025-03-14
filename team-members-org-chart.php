@@ -38,6 +38,18 @@ function tmoc_register_widget( $widgets_manager ) {
     }
 }
 
+function tmoc_enqueue_elementor_scripts() {
+    // Ensure this only runs when Elementor's editor is active
+    if (\Elementor\Plugin::$instance->editor->is_edit_mode()) {
+        wp_enqueue_script('jquery'); // Ensure jQuery is loaded
+        error_log("🚀 Enqueuing Elementor scripts... (team-members-org-chart.php)");
+    } else {
+        error_log("❌ Elementor scripts not enqueued. (team-members-org-chart.php)");
+    }
+}
+add_action('elementor/editor/before_enqueue_scripts', 'tmoc_enqueue_elementor_scripts');
+
+
 // Add settings page
 function tmoc_add_settings_page() {
     add_menu_page(
@@ -117,6 +129,68 @@ function tmoc_add_team_members_manager_page() {
 }
 add_action('admin_menu', 'tmoc_add_team_members_manager_page');
 
+// --------- Duplicate a team member --------- //
+function tmoc_duplicate_team_member() {
+    if (!isset($_GET['post']) || !isset($_GET['_wpnonce'])) {
+        wp_die('Invalid request');
+    }
+
+    $post_id = absint($_GET['post']);
+
+    if (!wp_verify_nonce($_GET['_wpnonce'], 'tmoc_duplicate_' . $post_id)) {
+        wp_die('Nonce verification failed');
+    }
+
+    // Get the original post
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'team_member') {
+        wp_die('Invalid post type');
+    }
+
+    // Prepare duplicate post data
+    $new_post_data = array(
+        'post_title'  => $post->post_title . ' (Copy)',
+        'post_content'=> $post->post_content,
+        'post_status' => 'draft', // Save as draft initially
+        'post_type'   => 'team_member',
+    );
+
+    // Insert the duplicated post
+    $new_post_id = wp_insert_post($new_post_data);
+
+    if ($new_post_id) {
+        // Copy post meta
+        $meta = get_post_meta($post_id);
+        foreach ($meta as $key => $values) {
+            foreach ($values as $value) {
+                update_post_meta($new_post_id, $key, $value);
+            }
+        }
+
+        // Redirect back
+        wp_redirect(admin_url('edit.php?post_type=team_member'));
+        exit;
+    } else {
+        wp_die('Error duplicating post.');
+    }
+}
+add_action('admin_action_tmoc_duplicate_member', 'tmoc_duplicate_team_member');
+
+// Add duplicate link to admin post list
+function tmoc_add_duplicate_link($actions, $post) {
+    if ($post->post_type === 'team_member') {
+        $duplicate_url = wp_nonce_url(
+            admin_url('admin.php?action=tmoc_duplicate_member&post=' . $post->ID),
+            'tmoc_duplicate_' . $post->ID
+        );
+
+        $actions['duplicate'] = '<a href="' . esc_url($duplicate_url) . '" title="Duplicate this item">Duplicate</a>';
+    }
+    return $actions;
+}
+add_filter('post_row_actions', 'tmoc_add_duplicate_link', 10, 2);
+// --------- End - Duplicate a team member --------- //
+
 // Set the initial order of team members to be chronological
 function tmoc_set_initial_order() {
     $args = array(
@@ -143,172 +217,262 @@ function tmoc_set_initial_order() {
 }
 register_activation_hook(__FILE__, 'tmoc_set_initial_order');
 
+// ----------------- TEAM MEMBER MANAGER PAGE SETTINGS ----------------- //
 
 // Callback function to display the Team Members Manager Page
 function tmoc_manage_members_page() {
+    // Get current sort order from the request or default to ascending order
+    $current_sort_order = isset($_GET['sort']) ? sanitize_text_field($_GET['sort']) : 'asc';
     ?>
     <div class="wrap">
         <h1>Manage Team Members</h1>
 
-        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
-            <?php wp_nonce_field('tmoc_save_settings', 'tmoc_settings_nonce'); ?>
-            <input type="hidden" name="action" value="tmoc_save_settings">
+        <h2>CSV Import / Export</h2>
+        <form method="post" enctype="multipart/form-data" action="<?php echo admin_url('admin-post.php'); ?>">
+            <?php wp_nonce_field('tmoc_import_csv', 'tmoc_import_nonce'); ?>
+            <input type="hidden" name="action" value="tmoc_import_csv">
 
-            <h2>Global Display Settings</h2>
-
-            <label for="tmoc_sort_order">Sort Order:</label>
-            <select name="tmoc_sort_order">
-                <option value="manual" <?php selected(get_option('tmoc_sort_order'), 'manual'); ?>>Manual</option>
-                <option value="date_desc" <?php selected(get_option('tmoc_sort_order'), 'date_desc'); ?>>Date Descending</option>
-                <option value="date_asc" <?php selected(get_option('tmoc_sort_order'), 'date_asc'); ?>>Date Ascending</option>
-                <option value="name" <?php selected(get_option('tmoc_sort_order'), 'name'); ?>>Name</option>
-                <option value="title" <?php selected(get_option('tmoc_sort_order'), 'title'); ?>>Title</option>
-                <option value="rank" <?php selected(get_option('tmoc_sort_order'), 'rank'); ?>>Rank</option>
+            <h2>Import Team Members</h2>
+            <p>Upload a CSV file in the correct format.</p>
+            <input type="file" name="tmoc_csv_file" required>
+            <select name="import_type">
+                <option value="add">Add as New Members</option>
+                <option value="overwrite">Overwrite All Members</option>
             </select>
-
-            <label for="tmoc_columns">Members Per Row:</label>
-            <input type="number" name="tmoc_columns" value="<?php echo esc_attr(get_option('tmoc_columns', 3)); ?>" min="1" max="6" />
-
-            <label for="tmoc_card_style">Card Style:</label>
-            <select name="tmoc_card_style">
-                <option value="style1" <?php selected(get_option('tmoc_card_style'), 'style1'); ?>>Style 1</option>
-                <option value="style2" <?php selected(get_option('tmoc_card_style'), 'style2'); ?>>Style 2</option>
-            </select>
-
-            <label for="tmoc_hover_style">Hover Style:</label>
-            <select name="tmoc_hover_style">
-                <option value="shadow" <?php selected(get_option('tmoc_hover_style'), 'shadow'); ?>>Shadow</option>
-                <option value="grow" <?php selected(get_option('tmoc_hover_style'), 'grow'); ?>>Grow</option>
-            </select>
-
-            <label for="tmoc_focus_style">Focus Style:</label>
-            <select name="tmoc_focus_style">
-                <option value="modal" <?php selected(get_option('tmoc_focus_style'), 'modal'); ?>>Modal</option>
-                <option value="anchor" <?php selected(get_option('tmoc_focus_style'), 'anchor'); ?>>Anchor Top and Grow</option>
-            </select>
-
-            <label for="tmoc_show_focus_on_load">
-                <input type="checkbox" name="tmoc_show_focus_on_load" value="yes" <?php checked(get_option('tmoc_show_focus_on_load'), 'yes'); ?> />
-                Show Focus on Load
-            </label>
-
-            <p><input type="submit" class="button button-primary" value="Save Settings (Override All Widgets)"></p>
+            <p><input type="submit" class="button button-primary" value="Upload CSV"></p>
         </form>
+
+        <h2>Download CSV Templates</h2>
+        <a href="<?php echo admin_url('admin-post.php?action=tmoc_download_template'); ?>" class="button">Download Blank CSV</a>
+        <a href="<?php echo admin_url('admin-post.php?action=tmoc_export_csv'); ?>" class="button button-primary">Export Members</a>
 
         <h2>Team Members</h2>
         <table class="wp-list-table widefat fixed striped">
             <thead>
                 <tr>
+                    <th>Unique ID</th>
                     <th>Name</th>
                     <th>Job Title</th>
+                    <th>Rank</th>
                     <th>Image</th>
-                    <th>Order</th>
+                    <th>
+                        Order
+                        <button class="tmoc-sort" data-sort="asc"><span class="dashicons dashicons-arrow-up-alt2"></span></button>
+                        <button class="tmoc-sort" data-sort="desc"><span class="dashicons dashicons-arrow-down-alt2"></span></button>
+                    </th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php
-                $args = array(
-                    'post_type'      => 'team_member',
-                    'posts_per_page' => -1,
-                    'orderby'        => 'meta_value_num',
-                    'meta_key'       => '_tmoc_order',
-                    'order'          => 'ASC',
-                );
-                $query = new WP_Query($args);
 
-                if ($query->have_posts()) {
-                    while ($query->have_posts()) {
-                        $query->the_post();
-                        $id = get_the_ID();
-                        $title = get_the_title();
-                        $job_title = get_post_meta($id, '_tmoc_job_title', true);
-                        $image = get_post_meta($id, '_tmoc_image', true);
-                        $order = get_post_meta($id, '_tmoc_order', true);
+                tmoc_render_members_table();
 
-                        echo '<tr>';
-                        echo '<td>' . esc_html($title) . '</td>';
-                        echo '<td>' . esc_html($job_title) . '</td>';
-                        echo '<td><img src="' . esc_url($image) . '" style="width:50px; height:50px; border-radius:50%;" /></td>';
-                        echo '<td style="text-align:center;"><strong>' . esc_html($order) . '</strong></td>';
-                        echo '<td>';
-                        echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="up">⬆</button>';
-                        echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="down">⬇</button>';
-                        echo '</td>';
-                        echo '<td>';
-                        echo '<a href="' . esc_url(get_edit_post_link($id)) . '" class="button button-primary">Edit</a>';
-                        echo '</td>';
-                        echo '</tr>';
-                    }
-                    wp_reset_postdata();
-                } else {
-                    echo '<tr><td colspan="5">No team members found.</td></tr>';
-                }
                 ?>
             </tbody>
         </table>
     </div>
     <?php
 }
-
-// Global settings shared between the Manage Members page and the Team Members widget
-function tmoc_save_global_settings() {
-    // Ensure user has proper permissions
+// ----------------- CSV Import / Export ----------------- //
+// Download blank template CSV
+function tmoc_download_template() {
     if (!current_user_can('manage_options')) {
         wp_die(__('Unauthorized access.', 'plugin-name'));
     }
 
-    // Validate Nonce
-    if (!isset($_POST['tmoc_settings_nonce']) || !wp_verify_nonce($_POST['tmoc_settings_nonce'], 'tmoc_save_settings')) {
-        wp_die(__('Security check failed.', 'plugin-name'));
-    }
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=team-members-template.csv');
 
-    // Save Options
-    update_option('tmoc_sort_order', sanitize_text_field($_POST['tmoc_sort_order']));
-    update_option('tmoc_columns', intval($_POST['tmoc_columns']));
-    update_option('tmoc_card_style', sanitize_text_field($_POST['tmoc_card_style']));
-    update_option('tmoc_hover_style', sanitize_text_field($_POST['tmoc_hover_style']));
-    update_option('tmoc_focus_style', sanitize_text_field($_POST['tmoc_focus_style']));
-    update_option('tmoc_show_focus_on_load', isset($_POST['tmoc_show_focus_on_load']) ? 'yes' : 'no');
+    $output = fopen('php://output', 'w');
+    fputcsv($output, ['Name', 'Job Title', 'Rank', 'Image URL', 'Bio', 'Order']);
 
-    // Force Elementor to clear cache and refresh
-    delete_transient('elementor_pro_license_data');
-    do_action('elementor/editor/after_save');
-
-    // Redirect back with a success message
-    wp_redirect(admin_url('admin.php?page=tmoc-manage-members&updated=true'));
+    fclose($output);
     exit;
 }
-add_action('admin_post_tmoc_save_settings', 'tmoc_save_global_settings');
+add_action('admin_post_tmoc_download_template', 'tmoc_download_template');
 
 
-// CSS Styles for the admin page
-function tmoc_enqueue_admin_styles($hook) {
-    if ($hook === 'post.php' || $hook === 'post-new.php' || $hook === 'toplevel_page_tmoc-settings') {
-        wp_enqueue_style('tmoc-admin-css', plugin_dir_url(__FILE__) . 'admin-style.css');
+// Export team members to CSV
+function tmoc_export_csv() {
+    if (!current_user_can('manage_options')) {
+        wp_die(__('Unauthorized access.', 'plugin-name'));
+    }
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=team-members-export.csv');
+
+    $output = fopen('php://output', 'w');
+
+    // ✅ Standard header row (always 6 columns)
+    fputcsv($output, ['Name', 'Job Title', 'Rank', 'Image URL', 'Bio', 'Order']);
+
+    $args = array(
+        'post_type'      => 'team_member',
+        'posts_per_page' => -1,
+        'orderby'        => 'meta_value_num',
+        'meta_key'       => '_tmoc_order',
+        'order'          => 'ASC',
+    );
+    $query = new WP_Query($args);
+
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+            $id = get_the_ID();
+            $name = get_the_title();
+            $job_title = get_post_meta($id, '_tmoc_job_title', true) ?: '';
+            $rank = get_post_meta($id, '_tmoc_rank', true) ?: '';
+            $image_url = get_post_meta($id, '_tmoc_image', true) ?: '';
+            $bio = get_post_meta($id, '_tmoc_bio', true) ?: '';
+            $order = get_post_meta($id, '_tmoc_order', true) ?: '';
+
+            // ✅ Ensure all 6 columns are present
+            fputcsv($output, [$name, $job_title, $rank, $image_url, $bio, $order]);
+        }
+        wp_reset_postdata();
+    }
+
+    fclose($output);
+    exit;
+}
+add_action('admin_post_tmoc_export_csv', 'tmoc_export_csv');
+
+
+// Import team members from CSV
+function tmoc_import_csv() {
+    if (!current_user_can('manage_options')) {
+        wp_die(__('Unauthorized access.', 'plugin-name'));
+    }
+
+    if (!isset($_FILES['tmoc_csv_file']) || $_FILES['tmoc_csv_file']['error'] !== UPLOAD_ERR_OK) {
+        wp_die(__('Error uploading file.', 'plugin-name'));
+    }
+
+    $file = $_FILES['tmoc_csv_file']['tmp_name'];
+
+    if (($handle = fopen($file, 'r')) !== FALSE) {
+        $headers = fgetcsv($handle); // ✅ Read and discard the header row
+
+        // ✅ Validate expected headers (must match export headers)
+        $expected_headers = ['Name', 'Job Title', 'Rank', 'Image URL', 'Bio', 'Order'];
+        if ($headers !== $expected_headers) {
+            fclose($handle);
+            wp_die(__('Invalid CSV format. Please use the provided template.', 'plugin-name'));
+        }
+
+        $row_count = 0;
+        while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+            $row_count++;
+            error_log("🔍 Processing row #$row_count: " . print_r($data, true));
+
+            if (count($data) < 6) {
+                error_log("⚠️ Skipping row #$row_count: Not enough columns.");
+                continue;
+            }
+
+            $name       = sanitize_text_field($data[0]);
+            $job_title  = sanitize_text_field($data[1]);
+            $rank       = sanitize_text_field($data[2]);
+            $image_url  = esc_url_raw($data[3]);
+            $bio        = sanitize_textarea_field($data[4]);
+            $order      = intval($data[5]);
+
+            if (empty($name)) {
+                error_log("⚠️ Skipping row #$row_count: No name provided.");
+                continue;
+            }
+
+            $post_id = wp_insert_post([
+                'post_title'   => $name,
+                'post_type'    => 'team_member',
+                'post_status'  => 'publish',
+            ]);
+
+            if ($post_id) {
+                update_post_meta($post_id, '_tmoc_job_title', $job_title);
+                update_post_meta($post_id, '_tmoc_rank', $rank);
+                update_post_meta($post_id, '_tmoc_image', $image_url);
+                update_post_meta($post_id, '_tmoc_bio', $bio);
+                update_post_meta($post_id, '_tmoc_order', $order);
+                error_log("✅ Successfully added: $name (ID: $post_id)");
+            } else {
+                error_log("❌ Failed to insert post for $name.");
+            }
+        }
+        fclose($handle);
+    }
+
+    wp_redirect(admin_url('admin.php?page=tmoc-manage-members&import_success=true'));
+    exit;
+}
+add_action('admin_post_tmoc_import_csv', 'tmoc_import_csv');
+
+
+ // ----------------- END - CSV Import / Export ----------------- //
+
+// ----------------- Sorting Members (w/ AJAX) ----------------- //
+function tmoc_render_members_table($order = 'ASC') {
+    $args = array(
+        'post_type'      => 'team_member',
+        'posts_per_page' => -1,
+        'meta_key'       => '_tmoc_order',
+        'orderby'        => 'meta_value_num',
+        'order'          => $order,
+    );
+
+    $query = new WP_Query($args);
+
+    if ($query->have_posts()) {
+        while ($query->have_posts()) {
+            $query->the_post();
+            $id = get_the_ID();
+            $title = get_the_title();
+            $rank = get_post_meta($id, '_tmoc_rank', true);
+            $job_title = get_post_meta($id, '_tmoc_job_title', true);
+            $image = get_post_meta($id, '_tmoc_image', true);
+            $order = get_post_meta($id, '_tmoc_order', true);
+
+            echo '<tr>';
+            echo '<td style="text-align:center;">' . esc_html($id) . '</td>';
+            echo '<td>' . esc_html($title) . '</td>';
+            echo '<td>' . esc_html($job_title) . '</td>';
+            echo '<td>' . esc_html($rank) . '</td>';
+            echo '<td><img src="' . esc_url($image) . '" style="width:50px; height:50px; border-radius:50%;" /></td>';
+            echo '<td style="text-align:center;"><strong>' . esc_html($order) . '</strong></td>';
+            echo '<td>';
+            echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="up"><span class="dashicons dashicons-arrow-up-alt2"></span></button>';
+            echo '<button class="button tmoc-move-member" data-id="' . $id . '" data-direction="down"><span class="dashicons dashicons-arrow-down-alt2"></span></button>';
+            echo '<a href="' . esc_url(get_edit_post_link($id)) . '" class="button button-primary">Edit</a>';
+            echo '</td>';
+            echo '</tr>';
+        }
+        wp_reset_postdata();
+    } else {
+        echo '<tr><td colspan="6">No team members found.</td></tr>';
     }
 }
-add_action('admin_enqueue_scripts', 'tmoc_enqueue_admin_styles');
 
-// Callbacks for settings fields
-function tmoc_sort_order_callback() {
-    $sort_order = get_option('tmoc_sort_order', 'name');
-    ?>
-    <select name="tmoc_sort_order">
-        <option value="name" <?php selected($sort_order, 'name'); ?>>Sort by Name</option>
-        <option value="job_title" <?php selected($sort_order, 'job_title'); ?>>Sort by Job Title</option>
-        <option value="manual" <?php selected($sort_order, 'manual'); ?>>Manual Order</option>
-    </select>
-    <?php
+function tmoc_sort_members_ajax() {
+    if (!isset($_POST['sort'])) {
+        wp_send_json_error("Missing sort parameter.");
+    }
+
+    $sort_order = sanitize_text_field($_POST['sort']);
+    $order = ($sort_order === 'desc') ? 'DESC' : 'ASC';
+
+    error_log("🔄 Sorting members by Order: $order");
+
+    ob_start();
+    tmoc_render_members_table($order);
+    $html = ob_get_clean();
+
+    wp_send_json_success(['html' => $html]);
 }
+add_action('wp_ajax_tmoc_sort_members', 'tmoc_sort_members_ajax');
 
-function tmoc_members_per_row_callback() {
-    $members_per_row = get_option('tmoc_members_per_row', 3);
-    ?>
-    <input type="number" name="tmoc_members_per_row" value="<?php echo esc_attr($members_per_row); ?>" min="1" max="10" />
-    <?php
-}
 
+// ----------------- TEAM MEMBER CUSTOM POST SETTINGS ----------------- //
 // Add Meta Box for additional fields
 function tmoc_add_team_member_meta_box() {
     add_meta_box(
@@ -324,19 +488,27 @@ add_action('add_meta_boxes', 'tmoc_add_team_member_meta_box');
 
 // Meta Box Callback - on display show the form fields
 function tmoc_team_member_meta_box_callback($post) {
+    $id = $post->ID;
     $job_title = get_post_meta($post->ID, '_tmoc_job_title', true);
     $bio = get_post_meta($post->ID, '_tmoc_bio', true);
+    $rank = get_post_meta($post->ID, '_tmoc_rank', true);
     $image = get_post_meta($post->ID, '_tmoc_image', true);
     $image_fit = get_post_meta($post->ID, '_tmoc_image_fit', true) ?: 'cover';
     $image_x = get_post_meta($post->ID, '_tmoc_image_x', true) ?: '0';
     $image_y = get_post_meta($post->ID, '_tmoc_image_y', true) ?: '0';
     $image_scale = get_post_meta($post->ID, '_tmoc_image_scale', true) ?: '1';
 
+    echo '<label for="tmoc_id">Unique ID:</label>';
+    echo '<input type="text" id="tmoc_id" name="tmoc_id" value="' . esc_attr($post->ID) . '" style="width:100%;" readonly />';
+
     echo '<label for="tmoc_job_title">Job Title:</label>';
     echo '<input type="text" id="tmoc_job_title" name="tmoc_job_title" value="' . esc_attr($job_title) . '" style="width:100%;" />';
 
     echo '<label for="tmoc_bio">Bio:</label>';
     echo '<textarea id="tmoc_bio" name="tmoc_bio" rows="4" style="width:100%;">' . esc_textarea($bio) . '</textarea>';
+
+    echo '<label for="tmoc_rank">Org. Rank:</label>';
+    echo '<input type="number" id="tmoc_rank" name="tmoc_rank" value="' . esc_attr($rank) . '" style="width:100%;" />';
 
     echo '<label for="tmoc_image">Profile Image:</label>';
     echo '<input type="text" id="tmoc_image" name="tmoc_image" value="' . esc_attr($image) . '" style="width:80%;" />';
@@ -383,10 +555,6 @@ function tmoc_team_member_meta_box_callback($post) {
     echo '</div>';
 }
 
-
-
-
-
 // Save the custom fields
 function tmoc_save_team_member_meta($post_id) {
     if (array_key_exists('tmoc_job_title', $_POST)) {
@@ -394,6 +562,9 @@ function tmoc_save_team_member_meta($post_id) {
     }
     if (array_key_exists('tmoc_bio', $_POST)) {
         update_post_meta($post_id, '_tmoc_bio', sanitize_textarea_field($_POST['tmoc_bio']));
+    }
+    if (array_key_exists('tmoc_rank', $_POST)) {
+        update_post_meta($post_id, '_tmoc_rank', intval($_POST['tmoc_rank']));
     }
     if (array_key_exists('tmoc_image', $_POST)) {
         update_post_meta($post_id, '_tmoc_image', sanitize_text_field($_POST['tmoc_image']));
@@ -426,6 +597,7 @@ function tmoc_save_team_member_meta($post_id) {
     }
 }
 add_action('save_post', 'tmoc_save_team_member_meta');
+
 
 // Set default order for team members on plugin activation
 function tmoc_set_default_order() {
@@ -474,17 +646,30 @@ function tmoc_hide_editor() {
 }
 add_action('admin_head', 'tmoc_hide_editor');
 
+
+// ----------------- ENQUEUE SCRIPTS ----------------- //
 // Script for admin page live updates
 // Load JS and localize AJAX URL
 function tmoc_enqueue_admin_scripts($hook) {
-    // error_log("🟢 Admin scripts hook triggered on: " . $hook);
+    error_log("🟢 Admin scripts hook triggered on: " . $hook);
+    wp_enqueue_script('jquery'); // Ensure jQuery loads first
 
+    // Load on manage members page specifically
+    if ($hook === 'team-member_page_tmoc-manage-members') {
+        wp_enqueue_script('tmoc-admin-js', plugin_dir_url(__FILE__) . 'js/admin.js', array('jquery'), null, true);
+        wp_localize_script('tmoc-admin-js', 'tmoc_ajax', array('ajax_url' => admin_url('admin-ajax.php')));
+        error_log("🚀 Enqueued admin scripts on manage page.");
+    }
     // Load admin.js if we're on any Team Members-related page
     if (strpos($hook, 'tmoc') !== false) {
         wp_enqueue_script('tmoc-admin-js', plugin_dir_url(__FILE__) . 'admin.js', array('jquery'), null, true);
         wp_localize_script('tmoc-admin-js', 'tmoc_ajax', array('ajax_url' => admin_url('admin-ajax.php')));
 
         error_log("🚀 Enqueued admin.js successfully!");
+        wp_enqueue_script('tmoc-interactive-js', plugin_dir_url(__FILE__) . 'interactive.js', array('jquery'), null, true);
+        wp_localize_script('tmoc-interactive-js', 'tmoc_ajax', array('ajax_url' => admin_url('admin-ajax.php')));
+
+        error_log("🚀 Enqueued interactive.js successfully!");
     } else {
         error_log("❌ Skipping script enqueue, not on plugin page.");
     }
@@ -496,8 +681,18 @@ function tmoc_enqueue_admin_scripts($hook) {
 add_action('admin_enqueue_scripts', 'tmoc_enqueue_admin_scripts');
 
 
-// Change team order with AJAX request
+// Change team order (UP/DOWN) with AJAX request
 function tmoc_reorder_members() {
+    error_log("🟢 AJAX Request Received");
+
+    if (!isset($_POST['post_id']) || !isset($_POST['direction'])) {
+        error_log("❌ Missing Parameters");
+        wp_send_json_error("Missing parameters.");
+    }
+
+    error_log("✅ Processing Order Change for Post ID: " . $_POST['post_id'] . " | Direction: " . $_POST['direction']);
+
+    // Validate required parameters
     if (!isset($_POST['post_id']) || !isset($_POST['direction'])) {
         error_log("❌ Missing parameters in AJAX request.");
         wp_send_json_error("Missing parameters.");
@@ -506,6 +701,12 @@ function tmoc_reorder_members() {
     $post_id = intval($_POST['post_id']);
     $direction = sanitize_text_field($_POST['direction']);
     $current_order = get_post_meta($post_id, '_tmoc_order', true);
+
+    if ($current_order === '') {
+        error_log("⚠️ Post ID: $post_id is missing `_tmoc_order`. Assigning default.");
+        $current_order = intval(get_post_field('menu_order', $post_id));
+        update_post_meta($post_id, '_tmoc_order', $current_order);
+    }
 
     error_log("🔄 Reordering post ID: $post_id (current order: $current_order) in direction: $direction");
 
@@ -525,7 +726,7 @@ function tmoc_reorder_members() {
             ),
         ),
     );
-    
+
     $query = new WP_Query($args);
     error_log("🔍 Found " . $query->post_count . " posts for swapping.");
 
@@ -536,17 +737,42 @@ function tmoc_reorder_members() {
 
         error_log("✅ Swapping post ID: $post_id (order: $current_order) with post ID: $swap_post_id (order: $swap_order)");
 
-        // Swap orders
+        // Swap the `_tmoc_order` meta field
         update_post_meta($post_id, '_tmoc_order', $swap_order);
         update_post_meta($swap_post_id, '_tmoc_order', $current_order);
+
+        // Also update WordPress menu_order for proper sorting in the admin panel
+        wp_update_post(array('ID' => $post_id, 'menu_order' => $swap_order));
+        wp_update_post(array('ID' => $swap_post_id, 'menu_order' => $current_order));
     } else {
         error_log("⚠️ No adjacent post found to swap with.");
     }
 
+    wp_reset_postdata();
     wp_send_json_success("Order updated.");
     error_log("✅ Order update completed.");
 }
 add_action('wp_ajax_tmoc_reorder_members', 'tmoc_reorder_members');
 
+// Load live widget interaction
+function tmoc_enqueue_interactive_scripts() {
+    wp_enqueue_script('tmoc-interactive-js', plugin_dir_url(__FILE__) . 'interactive.js', array('jquery'), null, true);
+    error_log("🚀 Enqueued interactive.js successfully!");
+}
+add_action('wp_enqueue_scripts', 'tmoc_enqueue_interactive_scripts');
 
+// Load widget styles
+function tmoc_enqueue_widget_styles() {
+    // Always enqueue styles
+    wp_enqueue_style('tmoc-widget-css', plugin_dir_url(__FILE__) . 'widget.css', array(), null);
+    error_log("✅ Enqueued widget.css for Elementor editing and frontend (team-members-org-chart.php)");
+}
+add_action('elementor/frontend/after_enqueue_styles', 'tmoc_enqueue_widget_styles'); // For Elementor
+add_action('wp_enqueue_scripts', 'tmoc_enqueue_widget_styles'); // For frontend
 
+function tmoc_enqueue_gsap() {
+    wp_enqueue_script('gsap', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js', array(), null, true);
+    wp_enqueue_script('cssruleplugin', 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/CSSRulePlugin.min.js', array(), null, true);
+    error_log("✅ Enqueued GSAP for animation (team-members-widget.php)");
+}
+add_action('wp_enqueue_scripts', 'tmoc_enqueue_gsap');

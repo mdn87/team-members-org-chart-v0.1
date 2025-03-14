@@ -1,0 +1,25 @@
+.team-members-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--gap, 20px);
+}
+
+.team-member {
+    flex: 1 1 calc(100% / var(--columns, 4) - var(--gap, 20px));
+    max-width: calc(100% / var(--columns, 4) - var(--gap, 20px));
+    text-align: center;
+    border: 2px solid #7AF;
+    padding: 10px;
+    cursor: pointer;
+}
+
+.team-member:hover {
+    transform: scale(1.05);
+}
+
+.team-member img {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+}
